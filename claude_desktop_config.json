@@ -3,7 +3,7 @@
     "hiel-excel-mcp": {
       "command": "python3",
       "args": [
-        "path/to/hiel_excel_mcp/server.py"
+        "server.py"
       ],
       "disabled": false
     }
