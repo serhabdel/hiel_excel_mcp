@@ -315,6 +315,18 @@ isort hiel_excel_mcp/
 mypy hiel_excel_mcp/
 ```
 
+## CI/CD Workflow
+
+This project uses GitHub Actions for continuous integration and deployment. The workflow includes:
+
+- **Automated Testing**: Tests run on multiple Python versions (3.8-3.11) and operating systems (Ubuntu, Windows)
+- **Code Quality Checks**: Linting with flake8, formatting with black, import sorting with isort, and type checking with mypy
+- **Test Coverage**: Coverage reports generated and uploaded to Codecov
+- **Package Building**: Python package built and verified with twine
+- **Docker Image**: Docker image built from the Dockerfile in the deploy directory
+
+To run the workflow manually, go to the Actions tab in the GitHub repository and select "Run workflow" on the "Build and Test Excel MCP" workflow.
+
 ## License
 
 MIT License - see LICENSE file for details.
