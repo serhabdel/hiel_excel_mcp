@@ -1,0 +1,158 @@
+stages:
+  - lint
+  - test
+  - build
+  - package
+  - docker
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.pip-cache"
+  DOCKER_DRIVER: overlay2
+
+# Cache pip dependencies between jobs
+cache:
+  key: ${CI_COMMIT_REF_SLUG}
+  paths:
+    - .pip-cache/
+    - venv/
+
+# Template for Python jobs
+.python-job:
+  image: python:${PYTHON_VERSION}
+  before_script:
+    - python -V
+    - pip install virtualenv
+    - virtualenv venv
+    - source venv/bin/activate
+    - pip install -U pip
+    - pip install -e ".[dev]"
+
+# Linting jobs
+flake8:
+  extends: .python-job
+  stage: lint
+  variables:
+    PYTHON_VERSION: "3.10"
+  script:
+    - pip install flake8
+    - flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+    - flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+black:
+  extends: .python-job
+  stage: lint
+  variables:
+    PYTHON_VERSION: "3.10"
+  script:
+    - pip install black
+    - black --check .
+
+isort:
+  extends: .python-job
+  stage: lint
+  variables:
+    PYTHON_VERSION: "3.10"
+  script:
+    - pip install isort
+    - isort --check-only --profile black .
+
+mypy:
+  extends: .python-job
+  stage: lint
+  variables:
+    PYTHON_VERSION: "3.10"
+  script:
+    - pip install mypy
+    - mypy --ignore-missing-imports .
+
+# Test jobs for different Python versions
+.test-template:
+  extends: .python-job
+  stage: test
+  script:
+    - pip install pytest pytest-cov
+    - pytest --cov=. --cov-report=xml --junitxml=report.xml
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+      junit: report.xml
+    expire_in: 1 week
+
+test-python-3.8:
+  extends: .test-template
+  variables:
+    PYTHON_VERSION: "3.8"
+
+test-python-3.9:
+  extends: .test-template
+  variables:
+    PYTHON_VERSION: "3.9"
+
+test-python-3.10:
+  extends: .test-template
+  variables:
+    PYTHON_VERSION: "3.10"
+
+test-python-3.11:
+  extends: .test-template
+  variables:
+    PYTHON_VERSION: "3.11"
+
+# Build Python package
+build-package:
+  extends: .python-job
+  stage: build
+  variables:
+    PYTHON_VERSION: "3.10"
+  script:
+    - pip install build wheel setuptools twine
+    - python -m build
+    - twine check dist/*
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 1 week
+
+# Package job - could be used for PyPI upload
+package-job:
+  extends: .python-job
+  stage: package
+  variables:
+    PYTHON_VERSION: "3.10"
+  script:
+    - echo "Package ready for distribution"
+  dependencies:
+    - build-package
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 1 month
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"
+
+# Docker build
+docker-build:
+  stage: docker
+  image: docker:20.10.16
+  services:
+    - docker:20.10.16-dind
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+  script:
+    - docker build -t $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG -f deploy/Dockerfile .
+    - |
+      if [[ "$CI_COMMIT_BRANCH" == "main" || "$CI_COMMIT_BRANCH" == "master" ]]; then
+        docker tag $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG $CI_REGISTRY_IMAGE:latest
+        echo "Tagged as latest"
+      fi
+    # Uncomment below to push to registry
+    # - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    # - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
+    # - |
+    #   if [[ "$CI_COMMIT_BRANCH" == "main" || "$CI_COMMIT_BRANCH" == "master" ]]; then
+    #     docker push $CI_REGISTRY_IMAGE:latest
+    #   fi
+  rules:
+    - if: $CI_COMMIT_BRANCH

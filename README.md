@@ -317,7 +317,11 @@ mypy hiel_excel_mcp/
 
 ## CI/CD Workflow
 
-This project uses GitHub Actions for continuous integration and deployment. The workflow includes:
+This project supports both GitHub Actions and GitLab CI/CD for continuous integration and deployment.
+
+### GitHub Actions
+
+The GitHub workflow includes:
 
 - **Automated Testing**: Tests run on multiple Python versions (3.8-3.11) and operating systems (Ubuntu, Windows)
 - **Code Quality Checks**: Linting with flake8, formatting with black, import sorting with isort, and type checking with mypy
@@ -326,6 +330,19 @@ This project uses GitHub Actions for continuous integration and deployment. The 
 - **Docker Image**: Docker image built from the Dockerfile in the deploy directory
 
 To run the workflow manually, go to the Actions tab in the GitHub repository and select "Run workflow" on the "Build and Test Excel MCP" workflow.
+
+### GitLab CI/CD
+
+The GitLab pipeline includes:
+
+- **Staged Pipeline**: Organized into lint, test, build, package, and docker stages
+- **Multiple Python Versions**: Tests run on Python 3.8, 3.9, 3.10, and 3.11
+- **Code Quality**: Separate jobs for flake8, black, isort, and mypy
+- **Artifacts**: Test reports and built packages stored as artifacts
+- **Docker Build**: Container image built from the Dockerfile in the deploy directory
+- **Caching**: Dependency caching between jobs for faster builds
+
+The pipeline automatically runs on all branches and can be viewed in the CI/CD section of your GitLab repository.
 
 ## License
 
