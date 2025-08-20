@@ -1,0 +1,95 @@
+version: '3.8'
+
+services:
+  excel-mcp-server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: excel-mcp-server
+    restart: unless-stopped
+    ports:
+      - "${MCP_PORT:-8000}:8000"
+      - "${MCP_WEBSOCKET_PORT:-8001}:8001"
+      - "${MCP_SSE_PORT:-8002}:8002"
+    environment:
+      - EXCEL_MCP_FILES_PATH=${EXCEL_MCP_FILES_PATH:-/data}
+      - EXCEL_MCP_CACHE_SIZE_MB=${EXCEL_MCP_CACHE_SIZE_MB:-100}
+      - EXCEL_MCP_MAX_WORKERS=${EXCEL_MCP_MAX_WORKERS:-4}
+      - EXCEL_MCP_LOG_LEVEL=${EXCEL_MCP_LOG_LEVEL:-INFO}
+      - EXCEL_MCP_ENABLE_MONITORING=${EXCEL_MCP_ENABLE_MONITORING:-true}
+      - EXCEL_MCP_ENABLE_SSL=${EXCEL_MCP_ENABLE_SSL:-false}
+      - EXCEL_MCP_SSL_CERT_PATH=${EXCEL_MCP_SSL_CERT_PATH:-/certs/cert.pem}
+      - EXCEL_MCP_SSL_KEY_PATH=${EXCEL_MCP_SSL_KEY_PATH:-/certs/key.pem}
+    volumes:
+      - excel-data:/data
+      - excel-cache:/cache
+      - ./certs:/certs:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - mcp-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: mcp-prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - mcp-network
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: mcp-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_INSTALL_PLUGINS=redis-datasource
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources
+    networks:
+      - mcp-network
+    depends_on:
+      - prometheus
+
+  redis:
+    image: redis:alpine
+    container_name: mcp-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - mcp-network
+    command: redis-server --appendonly yes
+
+networks:
+  mcp-network:
+    driver: bridge
+
+volumes:
+  excel-data:
+  excel-cache:
+  prometheus-data:
+  grafana-data:
+  redis-data:

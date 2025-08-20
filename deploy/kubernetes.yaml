@@ -1,0 +1,234 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: excel-mcp
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: excel-mcp-config
+  namespace: excel-mcp
+data:
+  EXCEL_MCP_FILES_PATH: "/data"
+  EXCEL_MCP_CACHE_PATH: "/cache"
+  EXCEL_MCP_LOG_LEVEL: "INFO"
+  EXCEL_MCP_MAX_WORKERS: "4"
+  EXCEL_MCP_CACHE_SIZE_MB: "100"
+  EXCEL_MCP_ENABLE_MONITORING: "true"
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: excel-mcp-secrets
+  namespace: excel-mcp
+type: Opaque
+stringData:
+  ssl-cert: |
+    -----BEGIN CERTIFICATE-----
+    # Your SSL certificate here
+    -----END CERTIFICATE-----
+  ssl-key: |
+    -----BEGIN PRIVATE KEY-----
+    # Your SSL private key here
+    -----END PRIVATE KEY-----
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: excel-data-pvc
+  namespace: excel-mcp
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: excel-cache-pvc
+  namespace: excel-mcp
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: fast-ssd
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: excel-mcp-server
+  namespace: excel-mcp
+  labels:
+    app: excel-mcp
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: excel-mcp
+  template:
+    metadata:
+      labels:
+        app: excel-mcp
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: excel-mcp
+        image: excel-mcp-server:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+          name: http
+          protocol: TCP
+        - containerPort: 8001
+          name: websocket
+          protocol: TCP
+        - containerPort: 8002
+          name: sse
+          protocol: TCP
+        envFrom:
+        - configMapRef:
+            name: excel-mcp-config
+        volumeMounts:
+        - name: excel-data
+          mountPath: /data
+        - name: excel-cache
+          mountPath: /cache
+        - name: ssl-certs
+          mountPath: /certs
+          readOnly: true
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "2000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+      volumes:
+      - name: excel-data
+        persistentVolumeClaim:
+          claimName: excel-data-pvc
+      - name: excel-cache
+        persistentVolumeClaim:
+          claimName: excel-cache-pvc
+      - name: ssl-certs
+        secret:
+          secretName: excel-mcp-secrets
+          items:
+          - key: ssl-cert
+            path: cert.pem
+          - key: ssl-key
+            path: key.pem
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: excel-mcp-service
+  namespace: excel-mcp
+  labels:
+    app: excel-mcp
+spec:
+  type: LoadBalancer
+  selector:
+    app: excel-mcp
+  ports:
+  - port: 80
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  - port: 8001
+    targetPort: 8001
+    protocol: TCP
+    name: websocket
+  - port: 8002
+    targetPort: 8002
+    protocol: TCP
+    name: sse
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: excel-mcp-hpa
+  namespace: excel-mcp
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: excel-mcp-server
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: excel-mcp-ingress
+  namespace: excel-mcp
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  tls:
+  - hosts:
+    - excel-mcp.example.com
+    secretName: excel-mcp-tls
+  rules:
+  - host: excel-mcp.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: excel-mcp-service
+            port:
+              number: 80
